@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote Desktop</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <h1>Remote Desktop</h1>
+    <div id="statusBadge" class="status offline">● Offline</div>
+
+    <!-- Mode & Setup Panel -->
+    <div id="roleView" class="card">
+      <div class="role-selector">
+        <button id="hostRoleBtn" class="role-btn active" onclick="selectRole('host')">Host</button>
+        <button id="controllerRoleBtn" class="role-btn" onclick="selectRole('controller')">Controller</button>
+      </div>
+
+      <!-- Host Panel -->
+      <div id="hostInputs" class="input-group">
+        <label>Your Session Code</label>
+        <div class="code-display" id="hostCode">------</div>
+        <button class="action-btn" onclick="startHost()">Generate Code & Share</button>
+      </div>
+
+      <!-- Controller Panel -->
+      <div id="controllerInputs" class="input-group hidden">
+        <label for="joinCode">Enter Host 6-Digit Code</label>
+        <input type="text" id="joinCode" placeholder="123456" maxlength="6">
+        <button class="action-btn" onclick="connectController()">Connect</button>
+      </div>
+    </div>
+
+    <!-- Active Stream View -->
+    <div id="screenView" class="card hidden">
+      <div class="screen-header">
+        <span id="screenLabel">Remote Screen</span>
+        <button class="disconnect-btn" onclick="disconnect()">Disconnect</button>
+      </div>
+      <div id="remoteScreen" class="remote-screen">
+        <div id="screenPlaceholder" class="placeholder-text">Waiting for video stream...</div>
+        <video id="remoteVideo" autoplay playsinline class="hidden"></video>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

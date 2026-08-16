@@ -1,0 +1,16 @@
+{
+  "name": "remote-desktop-signaling",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "robotjs": "^0.9.1",
+    "ws": "^8.18.0"
+  },
+  "allowScripts": {
+    "robotjs@0.9.1": true
+  }
+}
