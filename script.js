@@ -7,7 +7,7 @@ let localStream = null;
 
 let iceCandidateQueue = [];
 
-const SIGNALING_URL = 'ws://192.168.1.8:8080';
+const SIGNALING_URL = 'wss://remote-desktop-signaling-hexa.onrender.com';
 
 const rtcConfig = {
   iceServers: [
