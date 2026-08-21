@@ -11,8 +11,29 @@ const SIGNALING_URL = 'wss://remote-desktop-signaling-hexa.onrender.com';
 
 const rtcConfig = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    {
+      urls: "stun:stun.relay.metered.ca:80",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "a40314b607be1f6f8bc4cd35",
+      credential: "Ad8AX7aGgHPlUZ8v",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "a40314b607be1f6f8bc4cd35",
+      credential: "Ad8AX7aGgHPlUZ8v",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "a40314b607be1f6f8bc4cd35",
+      credential: "Ad8AX7aGgHPlUZ8v",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "a40314b607be1f6f8bc4cd35",
+      credential: "Ad8AX7aGgHPlUZ8v",
+    },
   ]
 };
 
