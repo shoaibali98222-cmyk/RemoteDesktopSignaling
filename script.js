@@ -4,38 +4,30 @@ let dataChannel = null;
 let sessionCode = null;
 let socket = null;
 let localStream = null;
+let bridgeToken = localStorage.getItem('bridgeToken') || '';
+let bridgeWarningShown = false;
+let lastMoveSent = 0;
 
 let iceCandidateQueue = [];
 
 const SIGNALING_URL = 'wss://remote-desktop-signaling-hexa.onrender.com';
+const BRIDGE_URL = 'http://localhost:3001/input';
+const MOVE_INTERVAL_MS = 33;      // max ~30 MOVE events per second from the controller
+const MAX_GESTURE_BYTES = 200;    // host ignores larger data-channel messages
 
-const rtcConfig = {
+// ICE servers (including TURN credentials) are sent by the signaling server for each session.
+// This STUN-only default is used until they arrive.
+let rtcConfig = {
   iceServers: [
-    {
-      urls: "stun:stun.relay.metered.ca:80",
-    },
-    {
-      urls: "turn:global.relay.metered.ca:80",
-      username: "a40314b607be1f6f8bc4cd35",
-      credential: "Ad8AX7aGgHPlUZ8v",
-    },
-    {
-      urls: "turn:global.relay.metered.ca:80?transport=tcp",
-      username: "a40314b607be1f6f8bc4cd35",
-      credential: "Ad8AX7aGgHPlUZ8v",
-    },
-    {
-      urls: "turn:global.relay.metered.ca:443",
-      username: "a40314b607be1f6f8bc4cd35",
-      credential: "Ad8AX7aGgHPlUZ8v",
-    },
-    {
-      urls: "turns:global.relay.metered.ca:443?transport=tcp",
-      username: "a40314b607be1f6f8bc4cd35",
-      credential: "Ad8AX7aGgHPlUZ8v",
-    },
+    { urls: "stun:stun.relay.metered.ca:80" }
   ]
 };
+
+function applyIceServers(iceServers) {
+  if (Array.isArray(iceServers) && iceServers.length > 0) {
+    rtcConfig = { iceServers: iceServers };
+  }
+}
 
 // ===============================
 // UI Controls
@@ -124,6 +116,23 @@ function sendSignal(action, payload = {}) {
 // ===============================
 
 async function startHost() {
+  // The bridge token protects your mouse/keyboard bridge (see bridge-token.txt)
+  if (!bridgeToken) {
+    bridgeToken = (prompt('Paste the token from bridge-token.txt:') || '').trim();
+
+    if (!bridgeToken) {
+      alert('Bridge token is required for Host.');
+      return;
+    }
+
+    localStorage.setItem('bridgeToken', bridgeToken);
+  }
+
+  if (localStream) {
+    localStream.getTracks().forEach((track) => track.stop());
+    localStream = null;
+  }
+
   try {
     localStream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
@@ -170,6 +179,16 @@ function connectController() {
 // ===============================
 
 function initPeerConnection() {
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
+
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+
   peerConnection = new RTCPeerConnection(rtcConfig);
 
   iceCandidateQueue = [];
@@ -232,6 +251,54 @@ function initPeerConnection() {
 // Data Channel
 // ===============================
 
+function isValidGesture(gesture) {
+  return (
+    gesture !== null &&
+    typeof gesture === 'object' &&
+    (gesture.type === 'MOVE' || gesture.type === 'TAP') &&
+    Number.isFinite(gesture.x) &&
+    Number.isFinite(gesture.y) &&
+    gesture.x >= 0 && gesture.x <= 1 &&
+    gesture.y >= 0 && gesture.y <= 1
+  );
+}
+
+function sendToBridge(gesture) {
+  fetch(BRIDGE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Token': bridgeToken
+    },
+    body: JSON.stringify({
+      type: gesture.type,
+      x: gesture.x,
+      y: gesture.y
+    })
+  })
+    .then((res) => {
+      if (res.status === 401) {
+        // Token is wrong or the bridge token file was regenerated
+        localStorage.removeItem('bridgeToken');
+        bridgeToken = '';
+
+        if (!bridgeWarningShown) {
+          bridgeWarningShown = true;
+          alert('Bridge token rejected. Click Disconnect, then Generate Code again and paste the token from bridge-token.txt.');
+        }
+        return;
+      }
+
+      bridgeWarningShown = false;
+    })
+    .catch((error) => {
+      if (!bridgeWarningShown) {
+        bridgeWarningShown = true;
+        console.error('Input bridge error (is input-server.js running?):', error);
+      }
+    });
+}
+
 function setupDataChannel(channel) {
   dataChannel = channel;
 
@@ -252,39 +319,27 @@ function setupDataChannel(channel) {
   // ===============================
 
   dataChannel.onmessage = (event) => {
+    // Only the host acts on remote input
+    if (currentRole !== 'host') {
+      return;
+    }
+
+    if (
+      typeof event.data !== 'string' ||
+      event.data.length > MAX_GESTURE_BYTES
+    ) {
+      return;
+    }
+
     try {
       const gesture = JSON.parse(event.data);
 
-      console.log(
-        'Received controller input:',
-        gesture
-      );
+      if (!isValidGesture(gesture)) {
+        return;
+      }
 
       // Send MOVE and TAP to RobotJS bridge
-      if (
-        currentRole === 'host' &&
-        (gesture.type === 'MOVE' ||
-         gesture.type === 'TAP')
-      ) {
-        fetch('http://localhost:3001/input', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(gesture)
-        })
-          .then(() => {
-            console.log(
-              `${gesture.type} sent to RobotJS bridge`
-            );
-          })
-          .catch((error) => {
-            console.error(
-              'Input bridge error:',
-              error
-            );
-          });
-      }
+      sendToBridge(gesture);
 
       // Future Android/WebView bridge
       if (
@@ -325,6 +380,8 @@ async function handleSignalingMessage(message) {
         'waiting'
       );
 
+      applyIceServers(message.iceServers);
+
       initPeerConnection();
 
       // Add host screen tracks
@@ -349,6 +406,30 @@ async function handleSignalingMessage(message) {
 
       break;
 
+    case 'controller-request': {
+
+      // Host must explicitly allow someone to control this PC
+      const allowed = window.confirm(
+        'Someone wants to view and CONTROL this computer.\n\nAllow only if you shared your code with them.'
+      );
+
+      sendSignal(
+        allowed ? 'approve-controller' : 'reject-controller'
+      );
+
+      if (!allowed) {
+        updateStatus('Waiting for Controller...', 'waiting');
+      }
+
+      break;
+    }
+
+    case 'join-pending':
+
+      updateStatus('Waiting for host approval...', 'waiting');
+
+      break;
+
     case 'controller-joined':
 
       await createOffer();
@@ -356,6 +437,8 @@ async function handleSignalingMessage(message) {
       break;
 
     case 'session-joined':
+
+      applyIceServers(message.iceServers);
 
       initPeerConnection();
 
@@ -542,12 +625,24 @@ async function processIceCandidateQueue() {
 // Controller Mouse Movement + Click
 // ===============================
 
+function normalizedPosition(event, element) {
+  const rect = element.getBoundingClientRect();
+
+  const normX = (event.clientX - rect.left) / rect.width;
+  const normY = (event.clientY - rect.top) / rect.height;
+
+  return {
+    x: Number(Math.min(1, Math.max(0, normX)).toFixed(4)),
+    y: Number(Math.min(1, Math.max(0, normY)).toFixed(4))
+  };
+}
+
 const remoteVideo =
   document.getElementById('remoteVideo');
 
 if (remoteVideo) {
 
-  // Mouse movement
+  // Mouse movement (throttled)
   remoteVideo.addEventListener(
     'mousemove',
     (event) => {
@@ -560,22 +655,21 @@ if (remoteVideo) {
         return;
       }
 
-      const rect =
-        remoteVideo.getBoundingClientRect();
+      const now = Date.now();
 
-      const normX =
-        (event.clientX - rect.left) /
-        rect.width;
+      if (now - lastMoveSent < MOVE_INTERVAL_MS) {
+        return;
+      }
 
-      const normY =
-        (event.clientY - rect.top) /
-        rect.height;
+      lastMoveSent = now;
+
+      const pos = normalizedPosition(event, remoteVideo);
 
       dataChannel.send(
         JSON.stringify({
           type: 'MOVE',
-          x: Number(normX.toFixed(4)),
-          y: Number(normY.toFixed(4))
+          x: pos.x,
+          y: pos.y
         })
       );
     }
@@ -594,29 +688,14 @@ if (remoteVideo) {
         return;
       }
 
-      const rect =
-        remoteVideo.getBoundingClientRect();
-
-      const normX =
-        (event.clientX - rect.left) /
-        rect.width;
-
-      const normY =
-        (event.clientY - rect.top) /
-        rect.height;
+      const pos = normalizedPosition(event, remoteVideo);
 
       dataChannel.send(
         JSON.stringify({
           type: 'TAP',
-          x: Number(normX.toFixed(4)),
-          y: Number(normY.toFixed(4))
+          x: pos.x,
+          y: pos.y
         })
-      );
-
-      console.log(
-        'Sent TAP:',
-        normX,
-        normY
       );
     }
   );
@@ -683,4 +762,5 @@ function disconnect() {
   ).srcObject = null;
 
   sessionCode = null;
+  bridgeWarningShown = false;
 }
